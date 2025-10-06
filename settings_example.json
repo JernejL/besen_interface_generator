@@ -1,0 +1,15 @@
+{
+	"setup":{
+		"rtticonvert":"[PATH_TO_RUN]rttiprocessor.exe",
+		"pasoutt":"[PATH_TO_OUTPUT]besenwrappers_types.pas",
+		"pasouti":"[PATH_TO_OUTPUT]besenwrappers_implementations.pas"
+	},
+	"pasfiles":[
+		"I:[PATH_TO]game_classes.pas"
+	],
+	"processor": {
+		"besen_writer_classes": [ "tactor", "tvehicle", "ttrigger" ],
+		"classpostfix" : "BesenInterface",
+		"mirror_prop_types": [ "integer", "single", "boolean", "tenginemode", "gametime" ]
+	}
+}
