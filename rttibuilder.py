@@ -11,6 +11,8 @@ if not os.path.exists(configjson):
 
 settings = json.loads( Path(configjson).read_text() )
 
+callprefix = "CallJSMethodProperty"
+
 # path to rttiprocessor binary
 rtticonvert = settings["setup"]["rtticonvert"]
 
@@ -112,8 +114,8 @@ def get_type_info(type_name):
             final_type = typ
 
     if final_type == None:
-        print("Type " + type_name + " not found in included units.")
-
+        print("Type " + type_name + " not found in included units, find unit and add it to settings.json under pasfiles.")
+    
     if "alias" in final_type: # mirrors another type:
         final_type = get_type_info(final_type["alias"])
 
@@ -137,6 +139,9 @@ def convert_param_for_call(paramname, paramtype, parameter_index):
 
     if paramtype.lower() == "vector": # to easy up conversion of vectors in parameters, we just take 3 parameters instead.
         return { "native_type": test_data_type, "param": "TBTypeconvert_" + paramtype.lower() + "(TBESEN(Self.BesenInstance), Arguments, BESEN_PARAMETER_" + str( parameter_index + 1) + ")", "used_params": 3, "signature": "NUMBER,NUMBER,NUMBER"}
+
+    if paramtype.lower() == "tfontinfo": # to easy up conversion of vectors in parameters, we just take 2 parameters instead.
+        return { "native_type": test_data_type, "param": "TBTypeconvert_" + paramtype.lower() + "(TBESEN(Self.BesenInstance), Arguments, BESEN_PARAMETER_" + str( parameter_index + 1) + ")", "used_params": 2, "signature": "NUMBER,NUMBER"}
 
     # special string types
     if paramtype.lower() in [ "tcolor","ident" ]:
@@ -255,17 +260,17 @@ def convert_one_routine(newclass, method, collect, return_simple, for_class_name
         callsignature = []
 
         for param in howmanyparams:
-            paramstack.append(param["access"] + " " + param["name"] + " " + remapcustomparameter(param["type"]))
+            paramstack.append(param["access"] + " " + param["name"].lower() + " " + remapcustomparameter(param["type"]))
 
-            callpa = convert_param_for_call_log(param["name"], param["type"], idx)
+            callpa = convert_param_for_call_log(param["name"].lower(), param["type"], idx)
 
             paramcallmakes.append(callpa["param"])  # todo.. here we do conversion.
-            paramlabels.append(param["name"] + " ( " + param["type"] + " )")
+            paramlabels.append(param["name"].lower() + " ( " + param["type"] + " )")
             idx += callpa["used_params"]  # TODO: convert_param_for_call_log should have option to grab multiple so it has to return it.
 
             callsignature.append(callpa["signature"])
 
-        method_def = method["name"] + "(" + ", ".join(paramstack) + ")"
+        method_def = method["name"].lower() + "(" + ", ".join(paramstack) + ")"
 
         if (method["method_type"] == "function"):
             method_def += ": " + remapcustomparameter(method["return"][0]["type"])
@@ -280,7 +285,7 @@ def convert_one_routine(newclass, method, collect, return_simple, for_class_name
         varout.append({
             # "count_check": besencomplain,
             "parameters_all": (", ".join(paramlabels)),
-            "just_call": method["name"] + "(" + ", ".join(paramcallmakes) + ");",
+            "just_call": method["name"].lower() + "(" + ", ".join(paramcallmakes) + ");",
             "call_signature": ",".join(callsignature)
         })
 
@@ -293,7 +298,7 @@ def convert_class_json(jsonclass):
         "implementation": []
     }
 
-    newclass = jsonclass["name"] + classpostfix
+    newclass = jsonclass["name"].lower() + classpostfix
 
     # prepare list of private vars, which can be mirrored.
 
@@ -307,14 +312,13 @@ def convert_class_json(jsonclass):
                     mirrorvars.append( public_var )
                 else:
                     if not public_var["proptype"].lower() in FunctionProperties: # special type
-                        print("IGNORING TYPE FOR PUBLIC VAR / PROPERTY " + public_var["name"] + " type = " + public_var["proptype"].lower() + " to support, add enum / type to mirror_prop_types list above.")
+                        print("IGNORING TYPE FOR PUBLIC VAR / PROPERTY " + public_var["name"].lower() + " type = " + public_var["proptype"].lower() + " to support, add enum / type to mirror_prop_types list above.")
 
     collect["definition"].append(newclass + " = class(TBESENNativeObject)")
     collect["definition"].append("protected");
     collect["definition"].append("\tprocedure ConstructObject(const ThisArgument: TBESENValue; Arguments: PPBESENValues; CountArguments: integer); Override;");
     collect["definition"].append("\tprocedure FinalizeObject; Override;");
     collect["definition"].append("private");
-    collect["definition"].append("\twrapobject: " + jsonclass["name"] + ";");
 
     # add private vars for functions
     for propclass in wrap_class_methodprops:
@@ -322,14 +326,15 @@ def convert_class_json(jsonclass):
             for property in jsonclass["properties"][propclass]:
 
                 if property["proptype"].lower() in FunctionProperties: # SPECIAL KIND used as method.
-                    collect["definition"].append( "\tF" + property["name"] + ": TBESENObjectFunction;")
+                    collect["definition"].append( "\tF" + property["name"].lower() + ": TBESENObjectFunction;")
 
     for mvar in mirrorvars:
-        collect["definition"].append("\tfunction readprop" + mvar["name"] + ": " + mvar["type"] + ";")
+        collect["definition"].append("\tfunction readprop" + mvar["name"].lower() + ": " + mvar["type"] + ";")
         if "write" in mvar:
-            collect["definition"].append("\tprocedure writeprop" + mvar["name"] + "( set_value: " + mvar["type"] + " );")
+            collect["definition"].append("\tprocedure writeprop" + mvar["name"].lower() + "( set_value: " + mvar["type"] + " );")
 
     collect["definition"].append("public"); # Published properties need a class derived from Tpersistent, not from TObject.
+    collect["definition"].append("\twrapobject: " + jsonclass["name"].lower() + "; // public so that converter functions can access it.");
     collect["definition"].append("\tBesenInstance: Tbesen;");
     collect["definition"].append("\tIsPrototype: boolean;");
 
@@ -347,7 +352,7 @@ def convert_class_json(jsonclass):
 
                     # SPECIAL KIND used as method
                     # TODO: can this go under private too?
-                    collect["definition"].append( "\tproperty " + property["name"] + ": TBESENObjectFunction read F" + property["name"] + " write F" + property["name"] + ";")
+                    collect["definition"].append( "\tproperty " + property["name"].lower() + ": TBESENObjectFunction read F" + property["name"] + " write F" + property["name"] + ";")
 
                     # todo: decompose original function and translate parameters
 
@@ -362,7 +367,7 @@ def convert_class_json(jsonclass):
 
                         # param stack in findtypedef["entire_definition"]
 
-                        methodname = "CallJS_" + property["name"]
+                        methodname = callprefix + "_" + property["name"].lower()
 
                         findtypedef["entire_definition"]["name"] = methodname
                         findtypedef["entire_definition"]["method_type"] = "procedure"
@@ -376,7 +381,10 @@ def convert_class_json(jsonclass):
                         parameter_builder = []
 
                         for parameterchek in findtypedef["entire_definition"]["parameters"]:
-                            parameter_builder.append(parameterchek["access"] + ' ' + parameterchek["name"] + ': ' + parameterchek["type"])
+
+                            # parameterchek["access"] + ' ' +
+
+                            parameter_builder.append( parameterchek["name"].lower() + ': ' + parameterchek["type"])
 
                         # constructor_structure = convert_one_routine(newclass, findtypedef["entire_definition"], None, True, newclass)
 
@@ -386,7 +394,10 @@ def convert_class_json(jsonclass):
                         collect["implementation"].append("procedure " + newclass + '.' + methodname + "(" + "; ".join(parameter_builder) + ");")
                         collect["implementation"].append("var")
 
-                        collect["implementation"].append("\tCallParams: array[0.." + str(len(parameter_builder) ) + "] of PBESENValue;")
+                        if (len(findtypedef["entire_definition"]["parameters"]) > 0):
+                            collect["implementation"].append("\tParamVars: array[0.." + str(len(parameter_builder) ) + "] of TBESENValue;")
+                            collect["implementation"].append("\tCallParams: array[0.." + str(len(parameter_builder)) + "] of PBESENValue;")
+
                         collect["implementation"].append("\tAResult: TBESENValue;")
 
                         if findtypedef["category"] == "function type":
@@ -394,10 +405,14 @@ def convert_class_json(jsonclass):
 
                         collect["implementation"].append("begin")
 
-                        collect["implementation"].append("\tif not assigned(wrapobject) then begin debug('calling method ''" + property["name"] + "'' on deleted object.'); exit(); end;")
+                        collect["implementation"].append("\tif not assigned(wrapobject) then begin BesenDebug('calling method ''" + property["name"].lower() + "'' on deleted object.'); exit(); end;")
                         collect["implementation"].append("\t")
-                        collect["implementation"].append("\tif Assigned(" +  property["name"] + ") then begin")
-                        collect["implementation"].append("\t\tBesenInstance.GarbageCollector.Protect(" + property["name"] + ");")
+                        collect["implementation"].append("\tif Assigned(" + property["name"].lower() + ") then begin")
+
+                        collect["implementation"].append("\t\tBesenInstance.GarbageCollector.Protect(" + property["name"].lower() + ");")
+
+                        collect["implementation"].append("\t\tCountCallsapp2script();")
+
                         collect["implementation"].append("\t\ttry")
                         collect["implementation"].append("\t\t\tAResult.ValueType := bvtBOOLEAN;")
 
@@ -405,12 +420,20 @@ def convert_class_json(jsonclass):
 
                         parami = 0
                         for parameterchek in findtypedef["entire_definition"]["parameters"]:
-                            collect["implementation"].append("\t\t\tTBTypeconvert_" + parameterchek["type"] + "_for_return(TBESEN(Instance), " + parameterchek["name"] + " , CallParams[" + str(parami) + "]^ ); // convert parameter.")
+                            collect["implementation"].append("\t\t\tTBTypeconvert_" + parameterchek["type"] + "_for_return(TBESEN(Instance), " + parameterchek["name"].lower() + " , ParamVars[" + str(parami) + "] ); // convert parameter.")
+                            parami += 1
+
+                        parami = 0
+                        for parameterchek in findtypedef["entire_definition"]["parameters"]:
+                            collect["implementation"].append("\t\t\tCallParams[" + str(parami) + "] := @ParamVars[" + str(parami) + "];")
                             parami += 1
 
                         collect["implementation"].append("\t\t")
 
-                        collect["implementation"].append("\t\t\t" +  property["name"] + ".Call(BESENObjectValue(self), @CallParams, " + str(len(parameter_builder)) + ", AResult);")
+                        if (len(findtypedef["entire_definition"]["parameters"]) > 0):
+                            collect["implementation"].append("\t\t\t" +  property["name"].lower() + ".Call(BESENObjectValue(self), @CallParams[0], " + str(len(parameter_builder)) + ", AResult);")
+                        else:
+                            collect["implementation"].append("\t\t\t" + property["name"].lower() + ".Call(BESENObjectValue(self), nil, 0, AResult);")
 
                         # TODO: if function, convert AResult into pascal type again.
                         if findtypedef["category"] == "function type":
@@ -419,10 +442,10 @@ def convert_class_json(jsonclass):
                             collect["implementation"].append("\t\t\tTBTypeconvert_" + "todo_type" + "(TBESEN(Instance), AResult, 0)");
 
                         collect["implementation"].append("\t\texcept")
-                        collect["implementation"].append("\t\t\ton e: exception do HandleBesenException(TBESEN(Instance), e);")
+                        collect["implementation"].append("\t\t\ton e: exception do HandleBesenException(TBESEN(Instance), e, ehm_exception);")
                         collect["implementation"].append("\t\tend;")
                         collect["implementation"].append("\t\t")
-                        collect["implementation"].append("\t\tTBESEN(Instance).GarbageCollector.UnProtect(OnTick);")
+                        collect["implementation"].append("\t\tTBESEN(Instance).GarbageCollector.UnProtect(" + property["name"].lower() + ");")
                         collect["implementation"].append("\t")
                         collect["implementation"].append("\tend;")
 
@@ -437,9 +460,9 @@ def convert_class_json(jsonclass):
 
     for mvar in mirrorvars:
         if "write" in mvar:
-            collect["definition"].append("\tproperty " + mvar["name"] + ": " + mvar["type"] + " read readprop" + mvar["name"] + " write writeprop" + mvar["name"] + ";")
+            collect["definition"].append("\tproperty " + mvar["name"].lower() + ": " + mvar["type"] + " read readprop" + mvar["name"].lower() + " write writeprop" + mvar["name"].lower() + ";")
         else:
-            collect["definition"].append("\tproperty " + mvar["name"] + ": " + mvar["type"] + " read readprop" + mvar["name"] + ";")
+            collect["definition"].append("\tproperty " + mvar["name"].lower() + ": " + mvar["type"] + " read readprop" + mvar["name"].lower() + ";")
 
     collect["implementation"].append("")
 
@@ -479,27 +502,27 @@ def convert_class_json(jsonclass):
     collect["implementation"].append("")
 
     for mvar in mirrorvars:
-        collect["implementation"].append("function " + newclass + ".readprop" + mvar["name"] + ": " + mvar["type"] + ";")
+        collect["implementation"].append("function " + newclass + ".readprop" + mvar["name"].lower() + ": " + mvar["type"] + ";")
         collect["implementation"].append("begin")
-        collect["implementation"].append("\tif not assigned(wrapobject) then begin debug('reading prop ''" + mvar["name"] + "'' on deleted object.'); exit(undefined_" + mvar["type"] + "); end; // if constant does not exist for type, define it.")
-        collect["implementation"].append("\texit(wrapobject." + mvar["name"] + ");")
+        collect["implementation"].append("\tif not assigned(wrapobject) then begin BesenDebug('reading prop ''" + mvar["name"].lower() + "'' on deleted object.'); exit(undefined_" + mvar["type"] + "); end; // if constant does not exist for type, define it.")
+        collect["implementation"].append("\tCountCallsscript2app();")
+        collect["implementation"].append("\texit(wrapobject." + mvar["name"].lower() + ");")
         collect["implementation"].append("end;")
         collect["implementation"].append("")
 
         if "write" in mvar:
-            collect["implementation"].append("procedure " + newclass + ".writeprop" + mvar["name"] + "( set_value: " + mvar["type"] + ");")
+            collect["implementation"].append("procedure " + newclass + ".writeprop" + mvar["name"].lower() + "( set_value: " + mvar["type"] + ");")
             collect["implementation"].append("begin")
-            collect["implementation"].append("\tif not assigned(wrapobject) then begin debug('writing prop ''" + mvar["name"] + "'' on deleted object.'); exit; end;")
-            collect["implementation"].append("\twrapobject." + mvar["name"] + ":= set_value;")
+            collect["implementation"].append("\tif not assigned(wrapobject) then begin BesenDebug('writing prop ''" + mvar["name"].lower() + "'' on deleted object.'); exit; end;")
+            collect["implementation"].append("\tCountCallsscript2app();")
+            collect["implementation"].append("\twrapobject." + mvar["name"].lower() + ":= set_value;")
             collect["implementation"].append("end;")
             collect["implementation"].append("")
-
-
 
     collect["implementation"].append("procedure " + newclass + ".ConstructObject(const ThisArgument: TBESENValue; Arguments: PPBESENValues; CountArguments: integer);")
 
     collect["implementation"].append("var")
-    collect["implementation"].append("\tinput_signature: string;")
+    collect["implementation"].append("\tinput_signature: unicodestring;")
 
     collect["implementation"].append("begin")
 
@@ -534,6 +557,7 @@ def convert_class_json(jsonclass):
             possible_calls.append(avariant["parameters_all"] + ' (' + avariant["call_signature"] + ')')
 
             collect["implementation"].append("\tif (input_signature = '" + avariant["call_signature"] + "') then begin")
+            collect["implementation"].append("\t\tCountCallsscript2app();")
             collect["implementation"].append("\t\twrapobject:= " + jsonclass["name"] + "." + avariant["just_call"])
             collect["implementation"].append("\t\twrapobject.mission := true;")
 
@@ -545,7 +569,7 @@ def convert_class_json(jsonclass):
 
     collect["implementation"].append("")
 
-    collect["implementation"].append("\traise EBESENError.Create('Wrong call for " + jsonclass["name"] + " constructor. Your call Signature = ' + input_signature + ', possible signatures: ' + #13 + '("  + "' + #13 + '" .join(possible_calls)  + "');")
+    collect["implementation"].append("\traise EBESENError.Create('Wrong call for " + jsonclass["name"] + " constructor.' + newline + 'Your call Signature = ' + input_signature + '.' + newline + 'Possible signatures: ' + newline + '("  + "' + newline + '" .join(possible_calls)  + "');")
     collect["implementation"].append("")
     collect["implementation"].append("end;")
     collect["implementation"].append("")
@@ -565,16 +589,16 @@ def convert_class_json(jsonclass):
                 constructor_structure = convert_one_routine(newclass, method, None, True, newclass)
 
                 # prepare for definition:
-                asstext = "\t" + "procedure" + " " + method["name"] + " (const ThisArgument: TBESENValue; Arguments: PPBESENValues; CountArguments: integer; var ResultValue:TBESENValue);"
+                asstext = "\t" + "procedure" + " " + method["name"].lower() + " (const ThisArgument: TBESENValue; Arguments: PPBESENValues; CountArguments: integer; var ResultValue:TBESENValue);"
 
                 if asstext not in collect["definition"]:
                     collect["definition"].append(asstext)
 
                 collect["implementation"].append("");
-                collect["implementation"].append("procedure" + " " + newclass + "." + method["name"] + " (const ThisArgument: TBESENValue; Arguments: PPBESENValues; CountArguments: integer; var ResultValue:TBESENValue);")
+                collect["implementation"].append("procedure" + " " + newclass + "." + method["name"].lower() + " (const ThisArgument: TBESENValue; Arguments: PPBESENValues; CountArguments: integer; var ResultValue:TBESENValue);")
 
                 collect["implementation"].append("var");
-                collect["implementation"].append("\tinput_signature: string;")
+                collect["implementation"].append("\tinput_signature: unicodestring;")
 
                 if (method["method_type"] == "function"):
                     collect["implementation"].append("\ttempreturn: " + method["return"][0]["type"] + ";");
@@ -590,15 +614,17 @@ def convert_class_json(jsonclass):
                     collect["implementation"].append("\t ")
 
                     #if (method["method_type"] == "function"):
-                    #    collect["implementation"].append("if not assigned(wrapobject) then begin debug('method ''" + method["name"] + "'' cannot be called on on deleted object.'); exit(undefined_" + method["return"][0]["type"] + "); end; // if constant does not exist for type, define it.")
+                    #    collect["implementation"].append("if not assigned(wrapobject) then begin BesenDebug('method ''" + method["name"] + "'' cannot be called on on deleted object.'); exit(undefined_" + method["return"][0]["type"] + "); end; // if constant does not exist for type, define it.")
                     #else:
-                    collect["implementation"].append("\tif not assigned(wrapobject) then begin debug('method ''" + method["name"] + "'' cannot be called on on deleted object.'); exit(); end;")
+                    collect["implementation"].append("\tif not assigned(wrapobject) then begin BesenDebug('method ''" + method["name"] + "'' cannot be called on on deleted object.'); exit(); end;")
 
                     collect["implementation"].append("\t ")
                     collect["implementation"].append("\tinput_signature:= BesenCallSignature(ThisArgument, Arguments, CountArguments);")
 
                     # collect["implementation"].append("\tif (check_can_call = '') then begin")
                     collect["implementation"].append("\tif (input_signature = '" + avariant["call_signature"] + "') then begin")
+
+                    collect["implementation"].append("\t\tCountCallsscript2app();")
 
                     if (method["method_type"] == "function"):
                         collect["implementation"].append("\t\ttempreturn:= wrapobject." + avariant["just_call"])
@@ -613,7 +639,7 @@ def convert_class_json(jsonclass):
                     collect["implementation"].append("\tend;")
 
                 collect["implementation"].append("");
-                collect["implementation"].append("\traise EBESENError.Create('Wrong call for " + jsonclass["name"] + "." + method["name"] + " method. Your call Signature = ' + input_signature + ', possible signatures: " + ( "' + #13 + '".join(possible_calls) ) + "');")
+                collect["implementation"].append("\traise EBESENError.Create('Wrong call for " + jsonclass["name"] + "." + method["name"].lower() + " method.' + newline + 'Your call Signature = ' + input_signature + '.' + newline + 'possible signatures: " + ( "' + newline + '".join(possible_calls) ) + "');")
                 collect["implementation"].append("");
                 collect["implementation"].append("end;");
 
